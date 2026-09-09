@@ -203,9 +203,16 @@
   </section>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+  // --- Konfiguracja Supabase ---
+  const SUPABASE_URL = 'https://xkobylmfcnlgdldxthpv.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_L3J_00mzpmlOqSOh-ACMgQ_Af0tH-rv';
+  const sb = window.supabase && window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
   const formularz = document.getElementById('formularz');
   const lista = document.getElementById('lista');
+  const przyciskDodaj = formularz.querySelector('button[type="submit"]');
 
   // --- Panel z rocznikami dla pola "Rok produkcji" ---
   const inputRok = document.getElementById('rok');
@@ -280,7 +287,7 @@
 
   // Zwraca wartość pola albo kreskę, gdy puste.
   function wartosc(v) {
-    v = (v || '').trim();
+    v = (v == null ? '' : String(v)).trim();
     return v === '' ? '—' : v;
   }
 
@@ -333,11 +340,84 @@
     return karta;
   }
 
-  formularz.addEventListener('submit', function (e) {
+  // --- Mapowanie: formularz <-> kolumny tabeli "karty" ---
+  function tekstAlboNull(v) {
+    v = (v || '').trim();
+    return v === '' ? null : v;
+  }
+
+  function formularzDoWiersza(d) {
+    return {
+      nr_rejestracyjny: tekstAlboNull(d.nrRej),
+      marka: tekstAlboNull(d.marka),
+      model: tekstAlboNull(d.model),
+      wersja: tekstAlboNull(d.wersja),
+      rok_produkcji: tekstAlboNull(d.rok),
+      silnik: tekstAlboNull(d.silnik),
+      pojemnosc_moc: tekstAlboNull(d.pojMoc),
+      stan_licznika: tekstAlboNull(d.licznik),
+      opis_zlecenia: tekstAlboNull(d.opis)
+    };
+  }
+
+  function wierszDoKarty(w) {
+    return {
+      nrRej: w.nr_rejestracyjny,
+      marka: w.marka,
+      model: w.model,
+      wersja: w.wersja,
+      rok: w.rok_produkcji,
+      silnik: w.silnik,
+      pojMoc: w.pojemnosc_moc,
+      licznik: w.stan_licznika,
+      opis: w.opis_zlecenia
+    };
+  }
+
+  function pokazKomunikat(tekst, blad) {
+    lista.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'pusto';
+    if (blad) p.style.color = '#b91c1c';
+    p.textContent = tekst;
+    lista.append(p);
+  }
+
+  // --- Wczytanie istniejących kart z Supabase przy otwarciu strony ---
+  async function wczytajKarty() {
+    if (!sb) {
+      pokazKomunikat('Nie załadowano biblioteki Supabase (sprawdź połączenie z internetem).', true);
+      return;
+    }
+    pokazKomunikat('Wczytywanie...', false);
+    let { data, error } = await sb.from('karty').select('*').order('id', { ascending: false });
+    if (error) {
+      ({ data, error } = await sb.from('karty').select('*'));
+    }
+    if (error) {
+      pokazKomunikat('Nie udało się wczytać kart: ' + error.message, true);
+      return;
+    }
+    lista.innerHTML = '';
+    if (!data || data.length === 0) {
+      pokazKomunikat('Brak kart. Wypełnij formularz i dodaj pierwszą.', false);
+      return;
+    }
+    for (const w of data) {
+      lista.append(utworzKarte(wierszDoKarty(w)));
+    }
+  }
+
+  // --- Zapis nowej karty do Supabase po submit ---
+  formularz.addEventListener('submit', async function (e) {
     e.preventDefault();
+    if (!sb) {
+      alert('Nie załadowano biblioteki Supabase (sprawdź połączenie z internetem).');
+      return;
+    }
 
     const fd = new FormData(formularz);
-    const dane = {
+    const wiersz = formularzDoWiersza({
       nrRej: fd.get('nrRej'),
       marka: fd.get('marka'),
       model: fd.get('model'),
@@ -347,15 +427,27 @@
       pojMoc: fd.get('pojMoc'),
       licznik: fd.get('licznik'),
       opis: fd.get('opis')
-    };
+    });
+
+    przyciskDodaj.disabled = true;
+    const { data, error } = await sb.from('karty').insert(wiersz).select();
+    przyciskDodaj.disabled = false;
+
+    if (error) {
+      alert('Nie udało się zapisać karty: ' + error.message);
+      return;
+    }
 
     const pusto = lista.querySelector('.pusto');
     if (pusto) pusto.remove();
 
-    lista.prepend(utworzKarte(dane));
+    const zapisany = (data && data[0]) ? wierszDoKarty(data[0]) : wierszDoKarty(wiersz);
+    lista.prepend(utworzKarte(zapisany));
     formularz.reset();
     document.getElementById('nrRej').focus();
   });
+
+  wczytajKarty();
 </script>
 
 </body>
