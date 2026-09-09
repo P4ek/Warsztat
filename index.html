@@ -117,7 +117,32 @@
   }
   .panel-rok .brak { padding: 8px 10px; color: var(--muted); }
 
-  #lista { display: grid; gap: 14px; }
+  #szukaj {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 9px 12px;
+    font: inherit;
+    color: inherit;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  #szukaj:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+    border-color: var(--accent);
+  }
+  .lista { display: grid; gap: 14px; }
+  .naglowek-sekcji {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 22px 0 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .naglowek-sekcji:first-of-type { margin-top: 4px; }
+  .licznik { color: var(--muted); font-weight: 600; font-size: 13px; }
   .pusto { color: var(--muted); }
   .karta {
     background: var(--card);
@@ -149,6 +174,34 @@
     padding-top: 12px;
     border-top: 1px solid var(--border);
     white-space: pre-wrap;
+  }
+  .karta.zakonczona {
+    opacity: .72;
+    border-left-color: var(--muted);
+  }
+  .karta-stopka {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .karta-stopka button {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+  .btn-przywroc {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+  }
+  .btn-przywroc:hover { background: #eef2ff; }
+  .znacznik-zakonczone {
+    color: #15803d;
+    font-size: 13px;
+    font-weight: 600;
   }
 </style>
 </head>
@@ -204,9 +257,12 @@
 
   <section>
     <h2>Lista kart</h2>
-    <div id="lista">
-      <p class="pusto">Brak kart. Wypełnij formularz i dodaj pierwszą.</p>
-    </div>
+    <input id="szukaj" type="search" placeholder="Szukaj: nr rejestracyjny, marka, model" autocomplete="off">
+    <p id="status" class="pusto" hidden></p>
+    <h3 class="naglowek-sekcji">Aktywne <span id="licznikAktywne" class="licznik"></span></h3>
+    <div id="listaAktywne" class="lista"></div>
+    <h3 class="naglowek-sekcji">Zakończone <span id="licznikZakonczone" class="licznik"></span></h3>
+    <div id="listaZakonczone" class="lista"></div>
   </section>
 </div>
 
@@ -218,7 +274,12 @@
   const sb = window.supabase && window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const formularz = document.getElementById('formularz');
-  const lista = document.getElementById('lista');
+  const szukaj = document.getElementById('szukaj');
+  const statusEl = document.getElementById('status');
+  const listaAktywne = document.getElementById('listaAktywne');
+  const listaZakonczone = document.getElementById('listaZakonczone');
+  const licznikAktywne = document.getElementById('licznikAktywne');
+  const licznikZakonczone = document.getElementById('licznikZakonczone');
   const przyciskDodaj = formularz.querySelector('button[type="submit"]');
 
   // --- Panel z rocznikami dla pola "Rok produkcji" ---
@@ -301,6 +362,9 @@
   function utworzKarte(d) {
     const karta = document.createElement('div');
     karta.className = 'karta';
+    karta.dataset.filtr = [d.nrRej, d.marka, d.model]
+      .map(function (x) { return x == null ? '' : String(x); })
+      .join(' ').toLowerCase();
 
     const tytul = [d.marka, d.model, d.wersja].filter(Boolean).join(' ').trim() || 'Pojazd';
     const podtytul = [
@@ -344,6 +408,29 @@
       karta.append(opis);
     }
 
+    const stopka = document.createElement('div');
+    stopka.className = 'karta-stopka';
+    if (d.zakonczone) {
+      karta.classList.add('zakonczona');
+      const znacznik = document.createElement('span');
+      znacznik.className = 'znacznik-zakonczone';
+      znacznik.textContent = '✓ Zlecenie zakończone';
+      const przywroc = document.createElement('button');
+      przywroc.type = 'button';
+      przywroc.className = 'btn-przywroc';
+      przywroc.textContent = 'Przywróć do aktywnych';
+      przywroc.addEventListener('click', function () { zmienStan(d, karta, false); });
+      stopka.append(znacznik, przywroc);
+    } else {
+      const zakoncz = document.createElement('button');
+      zakoncz.type = 'button';
+      zakoncz.className = 'btn-zakoncz';
+      zakoncz.textContent = 'Zakończ zlecenie';
+      zakoncz.addEventListener('click', function () { zmienStan(d, karta, true); });
+      stopka.append(zakoncz);
+    }
+    karta.append(stopka);
+
     return karta;
   }
 
@@ -369,6 +456,8 @@
 
   function wierszDoKarty(w) {
     return {
+      id: w.id,
+      zakonczone: !!w.zakonczone,
       nrRej: w.nr_rejestracyjny,
       marka: w.marka,
       model: w.model,
@@ -382,12 +471,34 @@
   }
 
   function pokazKomunikat(tekst, blad) {
-    lista.innerHTML = '';
-    const p = document.createElement('p');
-    p.className = 'pusto';
-    if (blad) p.style.color = '#b91c1c';
-    p.textContent = tekst;
-    lista.append(p);
+    statusEl.textContent = tekst || '';
+    statusEl.style.color = blad ? '#b91c1c' : '';
+    statusEl.hidden = !tekst;
+  }
+
+  // Placeholdery i liczniki dla sekcji "Aktywne" / "Zakończone".
+  function odswiezSekcje() {
+    [[listaAktywne, licznikAktywne, 'Brak aktywnych zleceń.'],
+     [listaZakonczone, licznikZakonczone, 'Brak zakończonych zleceń.']].forEach(function (para) {
+      const el = para[0], licznikEl = para[1], pustyTekst = para[2];
+      const karty = el.querySelectorAll('.karta');
+      const widoczne = el.querySelectorAll('.karta:not([hidden])').length;
+      licznikEl.textContent = karty.length ? '(' + karty.length + ')' : '';
+      let info = el.querySelector('.info-sekcji');
+      let tekst = '';
+      if (karty.length === 0) tekst = pustyTekst;
+      else if (widoczne === 0) tekst = 'Brak kart pasujących do wyszukiwania.';
+      if (tekst) {
+        if (!info) {
+          info = document.createElement('p');
+          info.className = 'pusto info-sekcji';
+          el.append(info);
+        }
+        info.textContent = tekst;
+      } else if (info) {
+        info.remove();
+      }
+    });
   }
 
   // --- Wczytanie istniejących kart z Supabase przy otwarciu strony ---
@@ -405,14 +516,14 @@
       pokazKomunikat('Nie udało się wczytać kart: ' + error.message, true);
       return;
     }
-    lista.innerHTML = '';
-    if (!data || data.length === 0) {
-      pokazKomunikat('Brak kart. Wypełnij formularz i dodaj pierwszą.', false);
-      return;
-    }
-    for (const w of data) {
-      lista.append(utworzKarte(wierszDoKarty(w)));
-    }
+    pokazKomunikat('');
+    listaAktywne.innerHTML = '';
+    listaZakonczone.innerHTML = '';
+    (data || []).forEach(function (w) {
+      const d = wierszDoKarty(w);
+      (d.zakonczone ? listaZakonczone : listaAktywne).append(utworzKarte(d));
+    });
+    filtrujKarty();
   }
 
   // --- Zapis nowej karty do Supabase po submit ---
@@ -445,14 +556,48 @@
       return;
     }
 
-    const pusto = lista.querySelector('.pusto');
-    if (pusto) pusto.remove();
-
     const zapisany = (data && data[0]) ? wierszDoKarty(data[0]) : wierszDoKarty(wiersz);
-    lista.prepend(utworzKarte(zapisany));
+    zapisany.zakonczone = false;
+    listaAktywne.prepend(utworzKarte(zapisany));
+    filtrujKarty();
     formularz.reset();
     document.getElementById('nrRej').focus();
   });
+
+  // --- Filtrowanie kart po nr rejestracyjnym, marce i modelu (lokalnie, bez zapytań) ---
+  function filtrujKarty() {
+    const q = szukaj.value.trim().toLowerCase();
+    document.querySelectorAll('#listaAktywne .karta, #listaZakonczone .karta').forEach(function (k) {
+      k.hidden = q !== '' && (k.dataset.filtr || '').indexOf(q) === -1;
+    });
+    odswiezSekcje();
+  }
+
+  // --- Przenoszenie zlecenia między "Aktywne" a "Zakończone" (zapis w Supabase) ---
+  async function zmienStan(d, kartaEl, zakoncz) {
+    if (!sb) {
+      alert('Nie załadowano biblioteki Supabase (sprawdź połączenie z internetem).');
+      return;
+    }
+    if (d.id == null) {
+      alert('Brak identyfikatora karty — odśwież stronę i spróbuj ponownie.');
+      return;
+    }
+    if (zakoncz && !window.confirm('Czy na pewno chcesz zakończyć to zlecenie?')) return;
+
+    const { error } = await sb.from('karty').update({ zakonczone: zakoncz }).eq('id', d.id);
+    if (error) {
+      alert('Nie udało się zaktualizować zlecenia: ' + error.message);
+      return;
+    }
+
+    d.zakonczone = zakoncz;
+    kartaEl.remove();
+    (zakoncz ? listaZakonczone : listaAktywne).prepend(utworzKarte(d));
+    filtrujKarty();
+  }
+
+  szukaj.addEventListener('input', filtrujKarty);
 
   wczytajKarty();
 </script>
